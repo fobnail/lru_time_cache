@@ -81,18 +81,38 @@
     missing_debug_implementations,
     variant_size_differences
 )]
+#![cfg_attr(not(feature = "std"), no_std)]
 
+#[cfg(not(feature = "std"))]
+extern crate alloc;
+
+use alloc::{
+    collections::{BTreeMap, VecDeque},
+    vec::Vec,
+};
+use core::borrow::Borrow;
+use core::time::Duration;
+use core::usize;
+#[cfg(all(not(feature = "sn_fake_clock"), feature = "embassy"))]
+use embassy_executor::time::Instant;
 #[cfg(feature = "sn_fake_clock")]
 use sn_fake_clock::FakeClock as Instant;
-use std::borrow::Borrow;
-use std::collections::{BTreeMap, VecDeque};
-use std::time::Duration;
-#[cfg(not(feature = "sn_fake_clock"))]
+#[cfg(all(not(feature = "sn_fake_clock"), feature = "std"))]
 use std::time::Instant;
-use std::usize;
 
 mod iter;
 pub use crate::iter::{Iter, NotifyIter, PeekIter, TimedEntry};
+
+#[cfg(not(feature = "embassy"))]
+pub(crate) fn embassy_time_convert(duration: Duration) -> Duration {
+    duration
+}
+
+#[cfg(feature = "embassy")]
+pub(crate) fn embassy_time_convert(duration: Duration) -> embassy_executor::time::Duration {
+    use core::convert::TryInto;
+    embassy_executor::time::Duration::from_micros(duration.as_micros().try_into().unwrap())
+}
 
 /// A view into a single entry in an LRU cache, which may either be vacant or occupied.
 pub enum Entry<'a, Key: 'a, Value: 'a> {
@@ -269,7 +289,7 @@ where
             self.list
                 .iter()
                 .filter_map(|key| self.map.get(key))
-                .position(|&(_, t)| t + ttl >= now)
+                .position(|&(_, t)| t + embassy_time_convert(ttl) >= now)
                 .map_or(0, |p| self.map.len() - p)
         })
     }
@@ -281,7 +301,7 @@ where
             self.list
                 .back()
                 .and_then(|key| self.map.get(key))
-                .map_or(true, |&(_, t)| t + ttl < now)
+                .map_or(true, |&(_, t)| t + embassy_time_convert(ttl) < now)
         })
     }
 
@@ -386,7 +406,10 @@ where
         self.map
             .get(key)
             .into_iter()
-            .find(|&(_, t)| self.time_to_live.map_or(true, |ttl| *t + ttl >= now))
+            .find(|&(_, t)| {
+                self.time_to_live
+                    .map_or(true, |ttl| *t + embassy_time_convert(ttl) >= now)
+            })
             .map(|&(ref value, _)| value)
     }
 
@@ -397,7 +420,7 @@ where
         if let Some(ttl) = self.time_to_live {
             let mut expired_values = Vec::new();
             for key in list.iter() {
-                if map[key].1 + ttl >= now {
+                if map[key].1 + embassy_time_convert(ttl) >= now {
                     break;
                 }
                 if let Some(entry) = map.remove(key) {

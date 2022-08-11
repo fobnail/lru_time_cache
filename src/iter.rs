@@ -9,12 +9,16 @@
 
 //! Misc LRU cache iterators.
 
+use alloc::collections::{BTreeMap, VecDeque};
+use core::time::Duration;
+#[cfg(all(not(feature = "sn_fake_clock"), feature = "embassy"))]
+use embassy_executor::time::Instant;
 #[cfg(feature = "sn_fake_clock")]
 use sn_fake_clock::FakeClock as Instant;
-use std::collections::{BTreeMap, VecDeque};
-use std::time::Duration;
-#[cfg(not(feature = "sn_fake_clock"))]
+#[cfg(all(not(feature = "sn_fake_clock"), feature = "std"))]
 use std::time::Instant;
+
+use crate::embassy_time_convert;
 
 /// An iterator over an `LruCache`'s entries that updates the timestamps as values are traversed.
 /// Values are produced in the most recently used order.
@@ -56,7 +60,7 @@ where
             let value = self.map.get(&key)?;
 
             if let Some(ttl) = self.lru_cache_ttl {
-                if value.1 + ttl > now {
+                if value.1 + embassy_time_convert(ttl) > now {
                     return Some(key);
                 } else {
                     let _ = self.map.remove(&key);
@@ -86,8 +90,8 @@ where
         value.1 = now;
 
         unsafe {
-            let key = std::mem::transmute::<&Key, &'a Key>(key);
-            let value = std::mem::transmute::<&Value, &'a Value>(&value.0);
+            let key = core::mem::transmute::<&Key, &'a Key>(key);
+            let value = core::mem::transmute::<&Value, &'a Value>(&value.0);
             Some((key, value))
         }
     }
@@ -148,7 +152,7 @@ where
         let now = Instant::now();
 
         if let Some(ttl) = self.lru_cache_ttl {
-            if value.1 + ttl <= now {
+            if value.1 + embassy_time_convert(ttl) <= now {
                 let value = self.map.remove(&key)?;
                 return Some(TimedEntry::Expired(key, value.0));
             }
@@ -158,8 +162,8 @@ where
         let key = self.list.back()?;
         value.1 = now;
         unsafe {
-            let key = std::mem::transmute::<&Key, &'a Key>(key);
-            let value = std::mem::transmute::<&Value, &'a Value>(&value.0);
+            let key = core::mem::transmute::<&Key, &'a Key>(key);
+            let value = core::mem::transmute::<&Value, &'a Value>(&value.0);
             Some(TimedEntry::Valid(key, value))
         }
     }
@@ -202,7 +206,7 @@ where
             let value = self.map.get(&self.list[self.item_index])?;
 
             if let Some(ttl) = self.lru_cache_ttl {
-                if value.1 + ttl > now {
+                if value.1 + embassy_time_convert(ttl) > now {
                     return Some(());
                 }
             } else {
@@ -228,8 +232,8 @@ where
         let value = self.map.get(&key)?;
 
         unsafe {
-            let key = std::mem::transmute::<&Key, &'a Key>(key);
-            let value = std::mem::transmute::<&Value, &'a Value>(&value.0);
+            let key = core::mem::transmute::<&Key, &'a Key>(key);
+            let value = core::mem::transmute::<&Value, &'a Value>(&value.0);
             Some((key, value))
         }
     }
